@@ -1,7 +1,12 @@
+import os
 import numpy as np
 import pandas as pd
 import seaborn as sns
+import logging
+from multiprocessing import Pool
 import matplotlib.pyplot as plt
+
+logging.basicConfig(format='%(asctime)s - %(message)s', level=logging.DEBUG)
 
 running_average = lambda m_n_1, r_i, n: m_n_1 + ((r_i - m_n_1) / n)
 
@@ -13,6 +18,7 @@ class RewardDistribution:
         self.sigma = 1
         self.q_star_mu = np.random.normal(self.mu, self.sigma, k)
         self.q_star_sd = np.ones(k)
+        logging.info('Setting up reward distribution')
 
     def get_reward(self, action):
         Rt = np.random.normal(self.q_star_mu[action], self.q_star_sd[action], 1)
@@ -117,6 +123,7 @@ class Experiment(EpsBandit):
         return pd.DataFrame(dataframe)
 
     def run(self, steps=10):
+        logging.info(f'Running experiment {self.name}')
         for t in range(1, steps):
             action = self._sample_an_action()
             r_t = self._execute_an_action(action)
@@ -139,7 +146,6 @@ class Experiments:
     def run_all_experiments(self):
         for _experiment in self.experiments:
             _experiment.run(steps=self.time_steps)
-            print(f'Finished Running experiment {_experiment}')
 
     def get_results(self):
         results = dict()
@@ -159,7 +165,7 @@ class Experiments:
 
 
 number_of_arms = 10
-# One reward distribution comman across all
+# One reward distribution common across all
 reward_distribution = RewardDistribution(k=number_of_arms)
 experiments = Experiments()
 experiments.set_time_steps(steps=1000)
@@ -183,23 +189,36 @@ experiment_3.set_epsilon(eps=0.1)
 experiments.add_an_experiment(experiment=experiment_3)
 
 
-net_result = None
-flag = False
-for episode in range(0, 100):
-    print(f"Running episode {episode}")
+def run_episode(eid):
+    logging.info(f'Running episode {eid}')
     experiments.run_all_experiments()
     results = experiments.get_results()
-    if not flag:
-        net_result = results
-        flag = True
-    else:
-        net_result['average_reward'] = running_average(m_n_1=net_result['average_reward'],
-                                                       r_i=results['average_reward'],
-                                                       n=episode)
-print(net_result.head())
-sns.lineplot(data=net_result, x='time_step', y='average_reward', hue='epsilon')
-plt.show()
+    results.to_csv(f'results/episode{eid}')
 
-#rint(experiment_1.get_action_dist())
-#print(experiment_1.get_q_values_dist())
+
+def main():
+    if not os.path.exists('results'):
+        os.mkdir('results')
+
+    number_of_episodes = 100
+    with Pool(8) as p:
+        p.map(run_episode, range(number_of_episodes))
+
+    flag = False
+    net_result = None
+    for eid in range(number_of_episodes):
+        result = pd.read_csv(f'results/episode{eid}')
+        if not flag:
+            net_result = result
+        else:
+            net_result['average_reward'] += result['average_reward']
+    net_result['average_reward'] = net_result['average_reward'] / number_of_episodes
+
+    print(net_result.head())
+    sns.lineplot(data=net_result, x='time_step', y='average_reward', hue='epsilon')
+    plt.show()
+
+
+if __name__ == "__main__":
+    main()
 
